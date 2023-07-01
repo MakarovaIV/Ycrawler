@@ -1,5 +1,5 @@
 import asyncio
-import socket
+from hashlib import shake_256
 
 import aiofiles
 import aiohttp
@@ -8,13 +8,12 @@ import os
 import re
 import time
 import uuid
-import requests
 from bs4 import BeautifulSoup
 
 URL = "https://news.ycombinator.com"
 Y_LINK = 'ycombinator.com'
 DOWNLOAD_DIR = "/tmp/ycrawler"
-CYCLE_SECONDS = 10 #sec
+CYCLE_TIMEOUT = 10 #sec
 REQUEST_TIMEOUT = 5 #sec
 
 
@@ -24,7 +23,7 @@ async def write_to_file(filename, content):
 
 
 def generate_name_from_link(url):
-    return "/" + str(uuid.uuid4())
+    return "/" + shake_256(url.encode()).hexdigest(10)
 
 
 async def find_news_blocks(session, url):
@@ -48,6 +47,7 @@ async def find_news_blocks(session, url):
             blocks.append(block)
         return blocks
     except Exception as e:
+        logging.warning("Cannot find news and comments block in {}".format(url))
         return []
 
 
@@ -77,6 +77,7 @@ async def get_external_link_from_page(session, url):
         all_links = map(lambda anchor: anchor['href'], soup.findAll('a'))
         return list(filter(filter_link, all_links))
     except Exception as e:
+        logging.warning("No response from comment link ({})".format(url))
         return []
 
 
@@ -90,28 +91,42 @@ async def save_url_to_disk(session, url, abs_path):
     await write_to_file(abs_path, content)
 
 
+# def get_dir_name(path):
+#     list_of_existed_dir = []
+#     for directories in os.walk(path):
+#         for name in directories:
+#             list_of_existed_dir.append(os.path.join(name))
+#     return list_of_existed_dir
+
+
+# def is_downloaded(dir_name, path):
+#     return dir_name in os.listdir(path)
+
+
 async def worker(session):
     start_time = time.time()
     print("start time: ", start_time)
     all_news = await find_news_blocks(session, URL)
-    for news in all_news[:2]:
+
+    for news in all_news:
         news_link = news['news_link']
         if news_link:
             dir_name = generate_name_from_link(news_link)
-            news_dir_name = DOWNLOAD_DIR + dir_name
-            create_dir(news_dir_name)
-            news_filename = news_dir_name + dir_name + '.html'
-            await save_url_to_disk(session, news_link, news_filename)
-
-            comment = news['comment_link']
-            if comment:
-                comment_links = await get_external_link_from_page(session, comment)
-                for link in comment_links[:3]:
-                    comment_dir_name = news_dir_name + '/comments'
-                    create_dir(comment_dir_name)
-                    comment_filename = comment_dir_name + generate_name_from_link(link) + '.html'
-                    await save_url_to_disk(session, link, comment_filename)
-
+            if dir_name in os.listdir(DOWNLOAD_DIR):
+                logging.warning("URL {} is already downloaded".format(news_link))
+            else:
+                news_dir_name = DOWNLOAD_DIR + dir_name
+                create_dir(news_dir_name)
+                news_filename = news_dir_name + dir_name + '.html'
+                await save_url_to_disk(session, news_link, news_filename)
+                comment = news['comment_link']
+                if comment:
+                    comment_links = await get_external_link_from_page(session, comment)
+                    for link in comment_links:
+                        comment_dir_name = news_dir_name + '/comments'
+                        create_dir(comment_dir_name)
+                        comment_filename = comment_dir_name + generate_name_from_link(link) + '.html'
+                        await save_url_to_disk(session, link, comment_filename)
     end_time = time.time()
     print("finished at: ", end_time)
     print("duration: ", end_time - start_time)
@@ -121,7 +136,7 @@ async def main():
     async with aiohttp.ClientSession() as session:
         while True:
             await worker(session)
-            await asyncio.sleep(CYCLE_SECONDS)
+            await asyncio.sleep(CYCLE_TIMEOUT)
 
 
 if __name__ == '__main__':

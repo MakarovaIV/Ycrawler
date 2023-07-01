@@ -12,4 +12,6 @@ Homework 11.0 from OTUS.
 pip install -r requirements.txt
 ```
 - Run app
-TBD
+```commandline
+python3 main.py
+```
