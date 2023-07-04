@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import time
-import uuid
 from bs4 import BeautifulSoup
 
 URL = "https://news.ycombinator.com"
@@ -91,18 +90,6 @@ async def save_url_to_disk(session, url, abs_path):
     await write_to_file(abs_path, content)
 
 
-# def get_dir_name(path):
-#     list_of_existed_dir = []
-#     for directories in os.walk(path):
-#         for name in directories:
-#             list_of_existed_dir.append(os.path.join(name))
-#     return list_of_existed_dir
-
-
-# def is_downloaded(dir_name, path):
-#     return dir_name in os.listdir(path)
-
-
 async def worker(session):
     start_time = time.time()
     print("start time: ", start_time)
@@ -112,7 +99,7 @@ async def worker(session):
         news_link = news['news_link']
         if news_link:
             dir_name = generate_name_from_link(news_link)
-            if dir_name in os.listdir(DOWNLOAD_DIR):
+            if dir_name in list(map(lambda el: '/' + el, os.listdir(DOWNLOAD_DIR))):
                 logging.warning("URL {} is already downloaded".format(news_link))
             else:
                 news_dir_name = DOWNLOAD_DIR + dir_name
