@@ -90,7 +90,7 @@ async def save_url_to_disk(session, url, abs_path):
     await write_to_file(abs_path, content)
 
 
-async def worker(session):
+async def worker(loop, session):
     start_time = time.time()
     print("start time: ", start_time)
     all_news = await find_news_blocks(session, URL)
@@ -107,23 +107,32 @@ async def worker(session):
                 news_filename = news_dir_name + dir_name + '.html'
                 await save_url_to_disk(session, news_link, news_filename)
                 comment = news['comment_link']
+                download_comment_tasks = []
                 if comment:
                     comment_links = await get_external_link_from_page(session, comment)
                     for link in comment_links:
                         comment_dir_name = news_dir_name + '/comments'
                         create_dir(comment_dir_name)
                         comment_filename = comment_dir_name + generate_name_from_link(link) + '.html'
-                        await save_url_to_disk(session, link, comment_filename)
+                        task = loop.create_task(save_url_to_disk(session, link, comment_filename))
+                        download_comment_tasks.append(task)
+                await asyncio.gather(*download_comment_tasks)
     end_time = time.time()
     print("finished at: ", end_time)
     print("duration: ", end_time - start_time)
 
 
+async def main_loop(loop, session):
+    while True:
+        await worker(loop, session)
+        await asyncio.sleep(CYCLE_TIMEOUT)
+
+
 async def main():
-    async with aiohttp.ClientSession() as session:
-        while True:
-            await worker(session)
-            await asyncio.sleep(CYCLE_TIMEOUT)
+    loop = asyncio.get_event_loop()
+    async with aiohttp.ClientSession(loop=loop) as session:
+        await main_loop(loop, session)
+    loop.close()
 
 
 if __name__ == '__main__':
