@@ -7,10 +7,13 @@ import logging
 import os
 import re
 import time
+
+from aiohttp import ClientConnectionError, ClientResponseError
+from asyncio import TimeoutError
 from bs4 import BeautifulSoup
 
 URL = "https://news.ycombinator.com"
-Y_LINK = 'ycombinator.com'
+IGNORED_ROOT_LINK = 'ycombinator.com'
 DOWNLOAD_DIR = "/tmp/ycrawler"
 CYCLE_TIMEOUT = 10 #sec
 REQUEST_TIMEOUT = 5 #sec
@@ -45,7 +48,8 @@ async def find_news_blocks(session, url):
                      'comment_link': (URL + '/' + comment_link['href']) if comment_link else None}
             blocks.append(block)
         return blocks
-    except Exception as e:
+    except (ClientConnectionError, ClientResponseError,
+            TimeoutError, UnicodeDecodeError) as e:
         logging.warning("Cannot find news and comments block in {}".format(url))
         return []
 
@@ -55,17 +59,14 @@ async def get_content(session, url):
     try:
         response = await session.get(url, timeout=REQUEST_TIMEOUT)
         content = await response.text()
-    except Exception as e:
+    except (ClientConnectionError, ClientResponseError,
+            TimeoutError, UnicodeDecodeError) as e:
         logging.warning("No response from {}".format(url))
     return content
 
 
 def filter_link(link):
-    if 'http' != link[:4]:
-        return False
-    if Y_LINK in link:
-        return False
-    return True
+    return 'http' == link[:4] and IGNORED_ROOT_LINK not in link
 
 
 async def get_external_link_from_page(session, url):
@@ -75,12 +76,13 @@ async def get_external_link_from_page(session, url):
         soup = BeautifulSoup(page, "html.parser")
         all_links = map(lambda anchor: anchor['href'], soup.findAll('a'))
         return list(filter(filter_link, all_links))
-    except Exception as e:
+    except (ClientConnectionError, ClientResponseError,
+            TimeoutError, UnicodeDecodeError) as e:
         logging.warning("No response from comment link ({})".format(url))
         return []
 
 
-def create_dir(abs_path):
+def create_dir_if_not_exist(abs_path):
     if not os.path.exists(abs_path):
         os.makedirs(abs_path)
 
@@ -103,7 +105,7 @@ async def worker(loop, session):
                 logging.warning("URL {} is already downloaded".format(news_link))
             else:
                 news_dir_name = DOWNLOAD_DIR + dir_name
-                create_dir(news_dir_name)
+                create_dir_if_not_exist(news_dir_name)
                 news_filename = news_dir_name + dir_name + '.html'
                 await save_url_to_disk(session, news_link, news_filename)
                 comment = news['comment_link']
@@ -112,7 +114,7 @@ async def worker(loop, session):
                     comment_links = await get_external_link_from_page(session, comment)
                     for link in comment_links:
                         comment_dir_name = news_dir_name + '/comments'
-                        create_dir(comment_dir_name)
+                        create_dir_if_not_exist(comment_dir_name)
                         comment_filename = comment_dir_name + generate_name_from_link(link) + '.html'
                         task = loop.create_task(save_url_to_disk(session, link, comment_filename))
                         download_comment_tasks.append(task)
